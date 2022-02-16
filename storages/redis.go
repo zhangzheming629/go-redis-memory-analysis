@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"strconv"
 	"strings"
-
+    "log"
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -60,8 +60,8 @@ func (client RedisClient) GetDatabases() (map[uint64]string, error) {
 	return databases, err
 }
 
-func (client RedisClient) Scan(cursor *uint64, match string, limit uint64) ([]string, error) {
-	reply, err := client.conn.Do("SCAN", *cursor, "MATCH", match, "COUNT", limit)
+func (client RedisClient) Scan(cursor *uint64) ([]string, error) {
+	reply, err := client.conn.Do("SCAN", *cursor)
 	result, err := redis.Values(reply, err)
 
 	var keys []string
@@ -99,4 +99,20 @@ func (client RedisClient) SerializedLength(key string) (uint64, error) {
 
 func (client RedisClient) Close() error {
 	return client.conn.Close()
+}
+
+func (client RedisClient) GetKeyType(key string) (string, error) {
+	keyType, err := client.conn.Do("Type", key)
+	keyTypeString, err := redis.String(keyType, err)
+	return keyTypeString, err
+}
+
+func (client RedisClient) GetKeyMemory(key string) (uint64, error) {
+	memory, err := client.conn.Do("MEMORY", "USAGE", key, "SAMPLES", 5)
+	if err != nil {
+		log.Fatalln("get key memory error", memory)
+		return 0,err
+	}
+	memoryUnit64,err := redis.Uint64(memory, err)
+	return memoryUnit64, err
 }

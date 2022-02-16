@@ -1,19 +1,17 @@
 package gorma
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
-	"strconv"
 	"strings"
-
+	"sort"
 	"github.com/hhxsv5/go-redis-memory-analysis/storages"
 )
 
 type AnalysisConnection struct {
 	redis   *storages.RedisClient
-	Reports DBReports
-	scanLimitNum uint64
+	Reports map[string][]Report
 }
 
 func NewAnalysisConnection(host string, port uint16, password string) (*AnalysisConnection, error) {
@@ -21,7 +19,7 @@ func NewAnalysisConnection(host string, port uint16, password string) (*Analysis
 	if err != nil {
 		return nil, err
 	}
-	return &AnalysisConnection{redis, DBReports{}, 0}, nil
+	return &AnalysisConnection{redis, map[string][]Report{}}, nil
 }
 
 func (analysis *AnalysisConnection) Close() {
@@ -29,30 +27,35 @@ func (analysis *AnalysisConnection) Close() {
 		_ = analysis.redis.Close()
 	}
 }
-func (analysis *AnalysisConnection) SetScanNum(num uint64) {
-	if num > 0 {
-		analysis.scanLimitNum = num
-	}
-}
 
-func (analysis AnalysisConnection) Start(delimiters []string) {
+func (analysis AnalysisConnection) Start(limitCount int) {
 	fmt.Println("Starting analysis")
-	match := "*[" + strings.Join(delimiters, "") + "]*"
 	databases, _ := analysis.redis.GetDatabases()
 	
-	if analysis.scanLimitNum == 0 {
-		analysis.scanLimitNum = 3000
-	}
-
 	var (
-		cursor uint64
-		r      Report
-		f      float64
-		ttl    int64
-		length uint64
-		sr     SortBySizeReports
-		mr     KeyReports
+		cursor 					  uint64
+		stringReport    		  Report
+		listReport      		  Report
+		hashReport      		  Report
+		setReport       		  Report
+		zsetReport      		  Report
+		size 					  uint64
+		stringSortBySizeReports   SortBySizeReports
+		listSortBySizeReports     SortBySizeReports
+		hashSortBySizeReports     SortBySizeReports
+		setSortBySizeReports     SortBySizeReports
+		zsetSortBySizeReports     SortBySizeReports
+		totalTypeBySizeReports    SortBySizeReports
+		mr     						KeyReports
 	)
+
+	analysis.Reports["strType"] = make(SortBySizeReports, 100)
+	analysis.Reports["listType"] = make(SortBySizeReports, 100)
+	analysis.Reports["hashType"] = make(SortBySizeReports, 100)
+	analysis.Reports["setType"] = make(SortBySizeReports, 100)
+	analysis.Reports["zsetType"] = make(SortBySizeReports, 100)
+	analysis.Reports["totalType"] = make(SortBySizeReports, 100)
+    reportMap := make(map[string]SortBySizeReports)
 
 	for db, _ := range databases {
 		fmt.Println("Analyzing db", db)
@@ -62,64 +65,102 @@ func (analysis AnalysisConnection) Start(delimiters []string) {
 		_ = analysis.redis.Select(db)
 
 		for {
-			keys, _ := analysis.redis.Scan(&cursor, match, analysis.scanLimitNum)
-			fd, fp, tmp, nk := "", 0, 0, ""
+			keys, _ := analysis.redis.Scan(&cursor)
+
 			for _, key := range keys {
-				fd, fp, tmp, nk, ttl = "", 0, 0, "", 0
-				for _, delimiter := range delimiters {
-					tmp = strings.Index(key, delimiter)
-					if tmp != -1 && (tmp < fp || fp == 0) {
-						fd, fp = delimiter, tmp
-					}
+				size, _ = analysis.redis.GetKeyMemory(key)
+				if size < 0 {
+                   continue
 				}
 
-				if fp == 0 {
-					continue
+				keyType, err := analysis.redis.GetKeyType(key)
+				if err != nil {
+					fmt.Println("analysis getkeyType error", err)
 				}
+				stringReport = mr[key]
+				listReport = mr[key]
+				hashReport = mr[key]
+				setReport = mr[key]
+				zsetReport = mr[key]
 
-				nk = key[0:fp] + fd + "*"
-
-				if _, ok := mr[nk]; ok {
-					r = mr[nk]
+				if 0 == strings.Compare("string", keyType) {
+					stringReport.Key = key
+					stringReport.Type = keyType
+					stringReport.Size = size
+					stringSortBySizeReports = append(stringSortBySizeReports, stringReport)
+					sort.Sort(stringSortBySizeReports)
+					stringSortBySizeReports, _ = itertor(limitCount, db, key ,keyType, size, stringReport, stringSortBySizeReports)
+					totalTypeBySizeReports = append(totalTypeBySizeReports, stringReport)
+				} else if 0 == strings.Compare("list", keyType) {
+					listReport.Key = key
+					listReport.Type = keyType
+					listReport.Size = size
+					listSortBySizeReports = append(listSortBySizeReports, listReport)
+					sort.Sort(listSortBySizeReports)
+					listSortBySizeReports, _ = itertor(limitCount, db, key ,keyType, size, listReport, listSortBySizeReports)
+					totalTypeBySizeReports = append(totalTypeBySizeReports, listReport)
+				} else if 0 == strings.Compare("hash", keyType) {
+					hashReport.Key = key
+					hashReport.Type = keyType
+					hashReport.Size = size
+					hashSortBySizeReports = append(hashSortBySizeReports, hashReport)
+					sort.Sort(hashSortBySizeReports)
+					hashSortBySizeReports, _ = itertor(limitCount, db, key ,keyType, size, hashReport, hashSortBySizeReports)
+					totalTypeBySizeReports = append(totalTypeBySizeReports, hashReport)
+				} else if 0 == strings.Compare("set", keyType) {
+					setReport.Key = key
+					setReport.Type = keyType
+					setReport.Size = size
+					setSortBySizeReports = append(setSortBySizeReports, setReport)
+					sort.Sort(setSortBySizeReports)
+					setSortBySizeReports, _ = itertor(limitCount, db, key ,keyType, size, setReport, setSortBySizeReports)
+					totalTypeBySizeReports = append(totalTypeBySizeReports, setReport)
 				} else {
-					r = Report{nk, 0, 0, 0, 0}
+					zsetReport.Key = key
+					zsetReport.Type = keyType
+					zsetReport.Size = size
+					zsetSortBySizeReports = append(zsetSortBySizeReports, zsetReport)
+					sort.Sort(zsetSortBySizeReports)
+					zsetSortBySizeReports, _ = itertor(limitCount, db, key ,keyType, size, zsetReport, zsetSortBySizeReports)
+					totalTypeBySizeReports = append(totalTypeBySizeReports, zsetReport)
 				}
-
-				ttl, _ = analysis.redis.Ttl(key)
-
-				switch ttl {
-				case -2:
-					continue
-				case -1:
-					r.NeverExpire++
-					r.Count++
-				default:
-					f = float64(r.AvgTtl*(r.Count-r.NeverExpire)+uint64(ttl)) / float64(r.Count+1-r.NeverExpire)
-					ttl, _ := strconv.ParseUint(fmt.Sprintf("%0.0f", f), 10, 64)
-					r.AvgTtl = ttl
-					r.Count++
-				}
-
-				length, _ = analysis.redis.SerializedLength(key)
-				r.Size += length
-
-				mr[nk] = r
 			}
 
 			if cursor == 0 {
 				break
 			}
 		}
-
-		//Sort by size
-		sr = SortBySizeReports{}
-		for _, report := range mr {
-			sr = append(sr, report)
-		}
-		sort.Sort(sr)
-
-		analysis.Reports[db] = sr
 	}
+	reportMap["strType"] = stringSortBySizeReports
+	reportMap["listType"] = listSortBySizeReports
+	reportMap["hashType"] = hashSortBySizeReports
+	reportMap["setType"] = setSortBySizeReports
+	reportMap["zsetType"] = zsetSortBySizeReports
+	sort.Sort(totalTypeBySizeReports)
+
+	var hundredLength = 100
+    var length = len(totalTypeBySizeReports)
+	if len(totalTypeBySizeReports) > 100 {
+		var sub = length - hundredLength
+		totalTypeBySizeReports = append(totalTypeBySizeReports[:len(totalTypeBySizeReports)-sub], totalTypeBySizeReports[len(totalTypeBySizeReports):]...)
+	}
+	reportMap["totalType"] = totalTypeBySizeReports
+
+	analysis.Reports["strType"] = reportMap["strType"]
+	analysis.Reports["listType"] = reportMap["listType"]
+	analysis.Reports["hashType"] = reportMap["hashType"]
+	analysis.Reports["setType"] = reportMap["setType"]
+	analysis.Reports["zsetType"] = reportMap["zsetType"]
+	analysis.Reports["totalType"] = reportMap["totalType"]
+
+}
+func itertor(limitCount int, db uint64, key string, keyType string, size uint64, r Report, sr SortBySizeReports) (SortBySizeReports, error) {
+  if len(sr) <= limitCount {
+	  return sr, nil
+  } else if len(sr) > limitCount {
+	  sr = append(sr[:len(sr)-1], sr[len(sr):]...)
+  }
+  return sr,nil
 }
 
 func (analysis AnalysisConnection) SaveReports(folder string) error {
@@ -129,30 +170,24 @@ func (analysis AnalysisConnection) SaveReports(folder string) error {
 	}
 
 	var (
-		str      string
-		filename string
-		size     float64
-		unit     string
+		str        string
+		jsonReport string
+		filename   string
 	)
-	template := fmt.Sprintf("%s%sredis-analysis-%s%s", folder, string(os.PathSeparator), strings.Replace(analysis.redis.Id, ":", "-", -1), "-%d.csv")
-	for db, reports := range analysis.Reports {
-		filename = fmt.Sprintf(template, db)
-		fp, err := storages.NewFile(filename, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-		if err != nil {
-			return err
-		}
-		_, _ = fp.Append([]byte("Key,Count,Size,NeverExpire,AvgTtl(excluded never expire)\n"))
-		for _, value := range reports {
-			size, unit = HumanSize(value.Size)
-			str = fmt.Sprintf("%s,%d,%s,%d,%d\n",
-				value.Key,
-				value.Count,
-				fmt.Sprintf("%0.3f %s", size, unit),
-				value.NeverExpire,
-				value.AvgTtl)
-			_, _ = fp.Append([]byte(str))
-		}
-		fp.Close()
+	template := fmt.Sprintf("%s%s%s%s", folder, string(os.PathSeparator), strings.Replace(analysis.redis.Id, ":", "-", -1), ".json")
+	filename = template
+	fp, err := storages.NewFile(filename, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return err
 	}
+	if ops,err := json.Marshal(analysis.Reports); err!=nil {
+		fmt.Println("json Marshal error: ", err)
+	} else {
+		jsonReport = string(ops)
+	}
+	str = fmt.Sprintf("%s\n", jsonReport)
+	_, _ = fp.Append([]byte(str))
+	fp.Close()
+	
 	return nil
 }
