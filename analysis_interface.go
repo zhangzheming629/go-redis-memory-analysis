@@ -8,10 +8,8 @@ type AnalysisInterface interface {
 
 type Report struct {
 	Key         string
-	Count       uint64
+	Type 		string
 	Size        uint64
-	NeverExpire uint64
-	AvgTtl      uint64
 }
 
 type DBReports map[uint64][]Report
@@ -33,10 +31,6 @@ func (sr SortBySizeReports) Swap(i, j int) {
 
 func (sr SortByCountReports) Len() int {
 	return len(sr)
-}
-
-func (sr SortByCountReports) Less(i, j int) bool {
-	return sr[i].Count > sr[j].Count
 }
 
 func (sr SortByCountReports) Swap(i, j int) {
