@@ -28,7 +28,7 @@
 
 test data 
 ```
-localhost:examples zhangzheming$ redis-cli 
+redis-cli 
 127.0.0.1:6379> set apple apple
 OK
 127.0.0.1:6379> set boy boy
@@ -66,11 +66,13 @@ OK
 ### Building
 ``````
 cd examples
+
 go build -o analysis 
 ``````
 
 ### Running 
 (redis 127.0.0.1:6379)
+
 ./analysis 
 
 输出redis五种数据类型的json
