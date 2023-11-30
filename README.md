@@ -1,115 +1,80 @@
-Redis memory analysis
-======
+- [redis五种数据结构](#redis五种数据结构)
+- [Building](#building)
+- [Running](#running)
 
-🔎  Analyzing memory of redis is to find the keys(prefix) which used a lot of memory, export the analysis result into csv file.
+### redis五种数据结构
+- 字符串 (String):
+  使用 SET key value 命令设置字符串类型的键值对。
 
-[![GoDoc](https://godoc.org/github.com/hhxsv5/go-redis-memory-analysis?status.svg)](https://godoc.org/github.com/hhxsv5/go-redis-memory-analysis)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hhxsv5/go-redis-memory-analysis)](https://goreportcard.com/report/github.com/hhxsv5/go-redis-memory-analysis)
-[![Sourcegraph](https://sourcegraph.com/github.com/hhxsv5/go-redis-memory-analysis/-/badge.svg)](https://sourcegraph.com/github.com/hhxsv5/go-redis-memory-analysis?badge)
+  例如：SET mykey "Hello"
+- 列表 (List):
+使用 LPUSH key value1 value2 或 RPUSH key value1 value2 
 
-## Binary File Usage
+命令在列表左侧或右侧添加元素。
 
-1. Download the appropriate binary file from [Releases](https://github.com/hhxsv5/go-redis-memory-analysis/releases)
+例如：LPUSH mylist "World"
+- 集合 (Set):
+使用 SADD key member1 member2 命令向集合添加成员。
 
-2. Run
+例如：SADD myset "one"
+- 哈希 (Hash):
+使用 HSET key field1 value1 field2 value2 命令为哈希表设置字段和值。
 
-```Shell
-# help
-./redis-memory-analysis-linux-amd64 -h
-Usage of ./redis-memory-analysis-darwin-amd64:
-  -ip string
-    	The host of redis (default "127.0.0.1")
-  -password string
-    	The password of redis (default "")
-  -port uint
-    	The port of redis (default 6379)
-  -rdb string
-    	The rdb file of redis (default "")
-  -prefixes string
-    	The prefixes list of redis key, be split by '//', special pattern characters need to escape by '\' (default "#//:")
-  -reportPath string
-    	The csv file path of analysis result (default "./reports")
+例如：HSET myhash field1 "value1"
+- 有序集合 (Sorted Set):
+使用 ZADD key score1 member1 score2 member2 命令向有序集合添加成员，每个成员都有一个分数。
 
-# run by connecting to redis
-./redis-memory-analysis-linux-amd64 -ip="127.0.0.1" -port=6380 -password="abc" -prefixes="#//:"
+例如：ZADD myzset 1 "member1"
 
-# run by redis rdb file
-./redis-memory-analysis-linux-amd64 -rdb="./6379_dump.rdb" -prefixes="#//:"
+test data 
+```
+localhost:examples zhangzheming$ redis-cli 
+127.0.0.1:6379> set apple apple
+OK
+127.0.0.1:6379> set boy boy
+OK
+127.0.0.1:6379> set test testtesttest
+OK
+127.0.0.1:6379> lpush book helloworld
+(integer) 1
+127.0.0.1:6379> lpush book hedbook
+(integer) 2
+127.0.0.1:6379> lpush humman man
+(integer) 1
+127.0.0.1:6379> lpush humman woman
+(integer) 2
+127.0.0.1:6379> lpush humman unknown
+(integer) 3
+127.0.0.1:6379> sadd myset one
+(integer) 1
+127.0.0.1:6379> sadd myset two
+(integer) 1
+127.0.0.1:6379> sadd yourset one
+(integer) 1
+127.0.0.1:6379> sadd yourset two
+(integer) 1
+127.0.0.1:6379> sadd yourset three
+(integer) 1
+127.0.0.1:6379> hset myhash field1 value
+(integer) 1
+127.0.0.1:6379> zadd myzset 1 "member1"
+(integer) 1
+127.0.0.1:6379> zadd myzset 2 "member2"
+(integer) 1
 ```
 
-## Source Code Usage
+### Building
+``````
+cd examples
+go build -o analysis 
+``````
 
-1. Install
+### Running 
+(redis 127.0.0.1:6379)
+./analysis 
 
-```Shell
-//cd your-root-folder-of-project
-// dep init
-dep ensure -add github.com/hhxsv5/go-redis-memory-analysis@~2.0.0
+输出redis五种数据类型的json
+```
+{"hashType":[{"Key":"myhash","Type":"hash","Size":76}],"listType":[{"Key":"humman","Type":"list","Size":154},{"Key":"book","Type":"list","Size":152}],"setType":[{"Key":"yourset","Type":"set","Size":268},{"Key":"myset","Type":"set","Size":235}],"strType":[{"Key":"test","Type":"string","Size":62},{"Key":"apple","Type":"string","Size":56},{"Key":"boy","Type":"string","Size":52}],"totalType":[{"Key":"yourset","Type":"set","Size":268},{"Key":"myset","Type":"set","Size":235},{"Key":"humman","Type":"list","Size":154},{"Key":"book","Type":"list","Size":152},{"Key":"myzset","Type":"zset","Size":83},{"Key":"myhash","Type":"hash","Size":76},{"Key":"test","Type":"string","Size":62},{"Key":"apple","Type":"string","Size":56},{"Key":"boy","Type":"string","Size":52}],"zsetType":[{"Key":"myzset","Type":"zset","Size":83}]}
 ```
 
-2. Run
-
-- Analyze keys by connecting to redis directly.
-
-```Go
-analysis := NewAnalysis()
-//Open redis: 127.0.0.1:6379 without password
-err := analysis.Open("127.0.0.1", 6379, "")
-defer analysis.Close()
-if err != nil {
-    fmt.Println("something wrong:", err)
-    return
-}
-
-//Scan the keys which can be split by '#' ':'
-//Special pattern characters need to escape by '\'
-analysis.Start([]string{"#", ":"})
-
-//Find the csv file in default target folder: ./reports
-//CSV file name format: redis-analysis-{host:port}-{db}.csv
-//The keys order by count desc
-err = analysis.SaveReports("./reports")
-if err == nil {
-    fmt.Println("done")
-} else {
-    fmt.Println("error:", err)
-}
-```
-
-- Analyze keys by redis `RDB` file, but cannot work out the size of key.
-
-```Go
-analysis := NewAnalysis()
-//Open redis rdb file: ./6379_dump.rdb
-err := analysis.OpenRDB("./6379_dump.rdb")
-defer analysis.CloseRDB()
-if err != nil {
-    fmt.Println("something wrong:", err)
-    return
-}
-
-//Scan the keys which can be split by '#' ':'
-//Special pattern characters need to escape by '\'
-analysis.StartRDB([]string{"#", ":"})
-
-//Find the csv file in default target folder: ./reports
-//CSV file name format: redis-analysis-{host:port}-{db}.csv
-//The keys order by count desc
-err = analysis.SaveReports("./reports")
-if err == nil {
-    fmt.Println("done")
-} else {
-    fmt.Println("error:", err)
-}
-```
-
-![CSV](https://raw.githubusercontent.com/hhxsv5/go-redis-memory-analysis/master/examples/demo.png)
-
-## Another tool implemented by PHP
-
-[redis-memory-analysis](https://github.com/hhxsv5/redis-memory-analysis)
-
-
-## License
-
-[MIT](https://github.com/hhxsv5/go-redis-memory-analysis/blob/master/LICENSE)
